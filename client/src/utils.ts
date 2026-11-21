@@ -58,6 +58,8 @@ export function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
+export const REACTION_EMOJIS = ['👍', '❤️', '🔥', '😂', '😮', '😢', '🙏', '🎉'] as const;
+
 export function sortChats(chats: Chat[]): Chat[] {
   return [...chats].sort((a, b) => {
     const aTime = a.lastMessage?.createdAt ?? a.createdAt;

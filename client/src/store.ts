@@ -7,6 +7,7 @@ import type {
   EditingState,
   LastMessage,
   Message,
+  Reaction,
   Theme,
   ToastState,
   TypingState,
@@ -46,6 +47,7 @@ interface AppState {
   startEditing: (message: Message) => void;
   cancelEditing: () => void;
   saveEdit: (text: string) => Promise<boolean>;
+  toggleReaction: (chatId: number, messageId: number, emoji: string) => Promise<void>;
   createChat: (userId: number) => Promise<Chat | null>;
   saveProfile: (name: string, bio: string) => Promise<void>;
   saveAvatar: (file: File) => Promise<void>;
@@ -58,7 +60,13 @@ interface AppState {
   clearToast: () => void;
   setConnected: (connected: boolean) => void;
   receiveMessage: (message: Message) => void;
-  receiveMessageUpdated: (message: Message) => void;
+  receiveMessageUpdated: (payload: {
+    chatId: number;
+    messageId: number;
+    text: string;
+    editedAt: number | null;
+  }) => void;
+  receiveMessageReactions: (payload: { chatId: number; messageId: number; reactions: Reaction[] }) => void;
   receiveRead: (payload: { chatId: number; userId: number; messageId: number }) => void;
   receiveTyping: (payload: { chatId: number; userId: number; name: string; isTyping: boolean }) => void;
   clearTyping: (chatId: number) => void;
@@ -83,6 +91,24 @@ function lastMessageFrom(message: Message): LastMessage {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : 'Что-то пошло не так';
+}
+
+function applyReactionToggle(reactions: Reaction[], emoji: string): Reaction[] {
+  const existing = reactions.find((reaction) => reaction.emoji === emoji);
+  if (!existing) {
+    return [...reactions, { emoji, count: 1, me: true }];
+  }
+  if (existing.me) {
+    if (existing.count <= 1) {
+      return reactions.filter((reaction) => reaction.emoji !== emoji);
+    }
+    return reactions.map((reaction) =>
+      reaction.emoji === emoji ? { ...reaction, count: reaction.count - 1, me: false } : reaction,
+    );
+  }
+  return reactions.map((reaction) =>
+    reaction.emoji === emoji ? { ...reaction, count: reaction.count + 1, me: true } : reaction,
+  );
 }
 
 export const useStore = create<AppState>()((set, get) => ({
@@ -321,6 +347,68 @@ export const useStore = create<AppState>()((set, get) => ({
       );
     }),
 
+  toggleReaction: (chatId, messageId, emoji) =>
+    new Promise<void>((resolve) => {
+      const socket = getSocket();
+      if (!socket || !socket.connected) {
+        get().showToast('Нет соединения с сервером', 'error');
+        resolve();
+        return;
+      }
+
+      const state = get();
+      const list = state.messages[chatId];
+      const previous = list?.find((message) => message.id === messageId)?.reactions;
+
+      if (list && previous) {
+        set({
+          messages: {
+            ...state.messages,
+            [chatId]: list.map((message) =>
+              message.id === messageId
+                ? { ...message, reactions: applyReactionToggle(message.reactions ?? [], emoji) }
+                : message,
+            ),
+          },
+        });
+      }
+
+      socket.emit(
+        'reaction:toggle',
+        { messageId, emoji },
+        (response: { ok?: boolean; error?: string; reactions?: Reaction[] }) => {
+          if (response?.error) {
+            if (list && previous) {
+              const current = get().messages[chatId] ?? [];
+              set({
+                messages: {
+                  ...get().messages,
+                  [chatId]: current.map((message) =>
+                    message.id === messageId ? { ...message, reactions: previous } : message,
+                  ),
+                },
+              });
+            }
+            get().showToast(response.error, 'error');
+          } else if (response?.reactions) {
+            const next = response.reactions;
+            const current = get().messages[chatId];
+            if (current) {
+              set({
+                messages: {
+                  ...get().messages,
+                  [chatId]: current.map((message) =>
+                    message.id === messageId ? { ...message, reactions: next } : message,
+                  ),
+                },
+              });
+            }
+          }
+          resolve();
+        },
+      );
+    }),
+
   createChat: async (userId) => {
     try {
       const { chat } = await api.createChat(userId);
@@ -420,24 +508,38 @@ export const useStore = create<AppState>()((set, get) => ({
     }
   },
 
-  receiveMessageUpdated: (message) => {
+  receiveMessageUpdated: ({ chatId, messageId, text, editedAt }) => {
     const state = get();
-    const list = state.messages[message.chatId];
+    const list = state.messages[chatId];
     const messages = list
       ? {
           ...state.messages,
-          [message.chatId]: list.map((item) => (item.id === message.id ? message : item)),
+          [chatId]: list.map((item) => (item.id === messageId ? { ...item, text, editedAt } : item)),
         }
       : state.messages;
 
     const chats = state.chats.map((chat) =>
-      chat.id === message.chatId && chat.lastMessage?.id === message.id
-        ? { ...chat, lastMessage: lastMessageFrom(message) }
+      chat.id === chatId && chat.lastMessage?.id === messageId
+        ? { ...chat, lastMessage: { ...chat.lastMessage!, text } }
         : chat,
     );
 
     set({ messages, chats });
     syncTitle(chats, state.activeChatId);
+  },
+
+  receiveMessageReactions: ({ chatId, messageId, reactions }) => {
+    const state = get();
+    const list = state.messages[chatId];
+    if (!list) return;
+    set({
+      messages: {
+        ...state.messages,
+        [chatId]: list.map((message) =>
+          message.id === messageId ? { ...message, reactions } : message,
+        ),
+      },
+    });
   },
 
   receiveRead: ({ chatId, userId, messageId }) => {
@@ -518,7 +620,8 @@ function attachSocket(token: string): void {
       if (error.message === 'unauthorized') useStore.getState().logout();
     },
     onMessage: (message) => useStore.getState().receiveMessage(message),
-    onMessageUpdated: (message) => useStore.getState().receiveMessageUpdated(message),
+    onMessageUpdated: (payload) => useStore.getState().receiveMessageUpdated(payload),
+    onMessageReactions: (payload) => useStore.getState().receiveMessageReactions(payload),
     onRead: (payload) => useStore.getState().receiveRead(payload),
     onTyping: (payload) => useStore.getState().receiveTyping(payload),
     onPresence: (payload) => useStore.getState().updatePresence(payload),

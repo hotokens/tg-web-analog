@@ -18,6 +18,12 @@ export interface Attachment {
   isImage: boolean;
 }
 
+export interface Reaction {
+  emoji: string;
+  count: number;
+  me: boolean;
+}
+
 export interface Message {
   id: number;
   chatId: number;
@@ -27,6 +33,7 @@ export interface Message {
   editedAt: number | null;
   replyToId: number | null;
   attachments: Attachment[];
+  reactions: Reaction[];
 }
 
 export interface LastMessage {

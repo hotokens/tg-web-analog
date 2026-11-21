@@ -70,7 +70,7 @@ export function createMessage(
   }
 
   const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(messageId) as any;
-  return serializeMessage(row);
+  return serializeMessage(row, senderId);
 }
 
 export function editMessage(
@@ -103,5 +103,5 @@ export function editMessage(
   }
 
   const updated = db.prepare('SELECT * FROM messages WHERE id = ?').get(messageId) as any;
-  return { message: serializeMessage(updated), chatId: row.chat_id };
+  return { message: serializeMessage(updated, userId), chatId: row.chat_id };
 }

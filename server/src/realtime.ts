@@ -5,7 +5,8 @@ import { chatMemberIds, chatPartnerIds, isChatMember, markChatRead } from './cha
 import { db } from './db.js';
 import { createMessage, editMessage } from './messages.js';
 import { addConnection, removeConnection } from './presence.js';
-import { getUserRow, publicUser } from './serialize.js';
+import { toggleReaction } from './reactions.js';
+import { getUserRow, publicUser, serializeReactions } from './serialize.js';
 
 let io: Server | null = null;
 
@@ -62,10 +63,36 @@ function registerSocket(socket: Socket): void {
         throw new Error('Сообщение не найдено');
       }
       const result = editMessage(messageId, userId, payload?.text);
-      emitToUsers(chatMemberIds(result.chatId), 'message:updated', { message: result.message });
+      emitToUsers(chatMemberIds(result.chatId), 'message:updated', {
+        chatId: result.chatId,
+        messageId: result.message.id,
+        text: result.message.text,
+        editedAt: result.message.editedAt,
+      });
       ack?.({ ok: true, message: result.message });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Не удалось изменить сообщение';
+      ack?.({ error: message });
+    }
+  });
+
+  socket.on('reaction:toggle', (payload: any, ack?: (response: any) => void) => {
+    try {
+      const messageId = Number(payload?.messageId);
+      if (!Number.isInteger(messageId) || messageId <= 0) {
+        throw new Error('Сообщение не найдено');
+      }
+      const result = toggleReaction(messageId, userId, payload?.emoji);
+      for (const memberId of chatMemberIds(result.chatId)) {
+        emitToUsers([memberId], 'message:reactions', {
+          chatId: result.chatId,
+          messageId: result.messageId,
+          reactions: serializeReactions(result.messageId, memberId),
+        });
+      }
+      ack?.({ ok: true, reactions: result.reactions });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Не удалось поставить реакцию';
       ack?.({ error: message });
     }
   });

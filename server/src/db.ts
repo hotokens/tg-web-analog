@@ -61,9 +61,18 @@ db.exec(`
     created_at  INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS message_reactions (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji      TEXT    NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id, emoji)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id, id);
   CREATE INDEX IF NOT EXISTS idx_members_user ON chat_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
+  CREATE INDEX IF NOT EXISTS idx_reactions_message ON message_reactions(message_id);
 `);
 
 const MINUTE = 60_000;
@@ -170,6 +179,10 @@ function seed(): void {
     `INSERT INTO attachments (message_id, uploader_id, file_name, mime_type, size, path, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
+  const insertReaction = db.prepare(
+    `INSERT OR IGNORE INTO message_reactions (message_id, user_id, emoji, created_at)
+     VALUES (?, ?, ?, ?)`,
+  );
 
   const addChat = (members: number[], createdMinutesAgo: number): number => {
     const result = insertChat.run('private', null, now - createdMinutesAgo * MINUTE);
@@ -202,7 +215,7 @@ function seed(): void {
     SEED_IMAGE,
     now - (3 * DAY_MINUTES - 16) * MINUTE,
   );
-  addMessage(bobChat, u.bob, 'Спасибо! Выглядит супер 🔥', 3 * DAY_MINUTES - 21);
+  const thanksMessage = addMessage(bobChat, u.bob, 'Спасибо! Выглядит супер 🔥', 3 * DAY_MINUTES - 21);
   addMessage(bobChat, u.alice, 'Ещё добавила тёмную тему в настройках', 3 * DAY_MINUTES - 22);
   addMessage(bobChat, u.bob, 'Проверил, всё работает', 25 * 60);
   addMessage(bobChat, u.bob, 'Кстати, го завтра обсудим группы и каналы?', 120);
@@ -219,12 +232,16 @@ function seed(): void {
   const daveChat = addChat([u.alice, u.dave], 2 * DAY_MINUTES);
   addMessage(daveChat, u.dave, 'Привет! Спасибо за помощь с вёрсткой 🙌', 2 * DAY_MINUTES);
   addMessage(daveChat, u.alice, 'Всегда пожалуйста! Получилось отлично', 2 * DAY_MINUTES - 2);
-  addMessage(daveChat, u.dave, 'Если что, обращайся', 2 * DAY_MINUTES - 3);
+  const daveLastMessage = addMessage(daveChat, u.dave, 'Если что, обращайся', 2 * DAY_MINUTES - 3);
 
   // Bob & Carol
   const bobCarolChat = addChat([u.bob, u.carol], 30);
   addMessage(bobCarolChat, u.carol, 'Борис, привет! Макет готов?', 30);
   addMessage(bobCarolChat, u.bob, 'Почти, доделаю к вечеру', 25);
+
+  insertReaction.run(mockupMessage, u.bob, '🔥', now - (3 * DAY_MINUTES - 15) * MINUTE);
+  insertReaction.run(thanksMessage, u.alice, '❤️', now - (3 * DAY_MINUTES - 20) * MINUTE);
+  insertReaction.run(daveLastMessage, u.alice, '🙏', now - (2 * DAY_MINUTES - 2) * MINUTE);
 
   const setRead = (chatId: number, userId: number, offsetFromEnd: number) => {
     const maxRow = db.prepare('SELECT MAX(id) AS maxId FROM messages WHERE chat_id = ?').get(chatId) as {

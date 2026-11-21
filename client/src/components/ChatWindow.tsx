@@ -23,6 +23,7 @@ export function ChatWindow() {
   const loadMore = useStore((state) => state.loadMore);
   const sendMessage = useStore((state) => state.sendMessage);
   const startEditing = useStore((state) => state.startEditing);
+  const toggleReaction = useStore((state) => state.toggleReaction);
   const editing = useStore((state) => state.editing);
   const showToast = useStore((state) => state.showToast);
 
@@ -117,6 +118,12 @@ export function ChatWindow() {
     if (typingState && atBottomRef.current) scrollToBottom(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [Boolean(typingState), activeChatId]);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !atBottomRef.current) return;
+    element.scrollTop = element.scrollHeight;
+  }, [messages]);
 
   useEffect(() => {
     if ((pending.length > 0 || uploading > 0) && atBottomRef.current) {
@@ -235,6 +242,7 @@ export function ChatWindow() {
         stackedBottom={Boolean(sameNext)}
         onImageClick={setLightbox}
         onEdit={startEditing}
+        onReact={(chatId, messageId, emoji) => void toggleReaction(chatId, messageId, emoji)}
         onMediaLoad={() => {
           if (atBottomRef.current) scrollToBottom(false);
         }}

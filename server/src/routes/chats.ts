@@ -116,7 +116,7 @@ router.get('/:id/messages', requireAuth, (req, res) => {
   const page = (hasMore ? rows.slice(0, limit) : rows).reverse();
 
   res.json({
-    messages: page.map(serializeMessage),
+    messages: page.map((row) => serializeMessage(row, userId)),
     hasMore,
   });
 });
