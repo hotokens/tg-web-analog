@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Attachment, Message, User } from '../types';
-import { REACTION_EMOJIS, formatSize, formatTime, parseUrls } from '../utils';
+import { FormattedText } from '../formatting';
+import { REACTION_EMOJIS, formatSize, formatTime } from '../utils';
 import { Avatar } from './Avatar';
 import { DownloadIcon, EmojiIcon, FileIcon, PencilIcon, TicksIcon } from './Icons';
 
@@ -196,23 +197,7 @@ export function MessageBubble({
 
           {message.text && (
             <div className="msg-text">
-              {parseUrls(message.text).map((part, index) => {
-                if (part.type === 'link') {
-                  return (
-                    <a key={index} href={part.value} target="_blank" rel="noreferrer">
-                      {part.value}
-                    </a>
-                  );
-                }
-                if (part.type === 'mention') {
-                  return (
-                    <span key={index} className="msg-mention">
-                      {part.value}
-                    </span>
-                  );
-                }
-                return <span key={index}>{part.value}</span>;
-              })}
+              <FormattedText text={message.text} />
             </div>
           )}
 

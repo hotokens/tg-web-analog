@@ -943,6 +943,18 @@ a {
   padding: 1px 1px 0;
 }
 
+.msg-text strong {
+  font-weight: 700;
+}
+
+.msg-text em {
+  font-style: italic;
+}
+
+.msg-text s {
+  text-decoration: line-through;
+}
+
 .msg-text a {
   color: var(--accent);
   text-decoration: none;
@@ -950,6 +962,61 @@ a {
 
 .msg-text a:hover {
   text-decoration: underline;
+}
+
+.msg-inline-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(16, 35, 47, 0.07);
+}
+
+.msg-code-block {
+  margin: 5px 0 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(16, 35, 47, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.msg-code-block code {
+  font-family: inherit;
+}
+
+.msg-spoiler {
+  border-radius: 4px;
+  padding: 0 2px;
+  background: rgba(16, 35, 47, 0.12);
+  filter: blur(4px);
+  cursor: pointer;
+  user-select: none;
+  transition: filter 0.15s, background 0.15s;
+}
+
+.msg-spoiler.is-revealed {
+  filter: none;
+  background: transparent;
+  padding: 0;
+  cursor: text;
+  user-select: text;
+}
+
+[data-theme='dark'] .msg-inline-code {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .msg-code-block {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme='dark'] .msg-spoiler {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .msg-mention {
@@ -1331,6 +1398,57 @@ a {
 
 .composer-input::placeholder {
   color: var(--text-muted);
+}
+
+.format-toggle .format-aa {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+}
+
+.format-bar {
+  position: absolute;
+  z-index: 19;
+  left: 16px;
+  bottom: calc(100% + 6px);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--modal-bg);
+  box-shadow: 0 8px 24px rgba(10, 25, 40, 0.18);
+  animation: modalIn 0.12s ease-out;
+}
+
+.format-btn {
+  width: 34px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+}
+
+.format-btn:hover {
+  background: var(--hover);
+  color: var(--accent);
+}
+
+.format-btn-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.format-btn-spoiler {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -1px;
 }
 
 .send-btn {
@@ -2439,6 +2557,10 @@ a {
 
   .composer-hint {
     display: none;
+  }
+
+  .format-bar {
+    left: 8px;
   }
 
   .composer-btn {

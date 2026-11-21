@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import type { Chat } from '../types';
+import { plainTextPreview } from '../formatting';
 import { formatChatTime } from '../utils';
 import { Avatar } from './Avatar';
 import { CloseIcon, PencilIcon, SearchIcon, SettingsIcon } from './Icons';
@@ -10,12 +11,16 @@ function previewText(chat: Chat, myId: number, typing: boolean): { text: string;
   const last = chat.lastMessage;
   if (!last) return { text: 'Нет сообщений', accent: false };
 
-  let text = last.text;
+  let text = plainTextPreview(last.text);
   if (!text) {
     text = last.attachmentType === 'image' ? 'Фотография' : last.attachmentType === 'file' ? 'Файл' : '';
   }
-  if (last.attachmentType === 'image' && last.text) text = `Фотография · ${text}`;
-  if (last.attachmentType === 'file' && last.text) text = `Файл · ${text}`;
+  if (last.attachmentType === 'image' && text && text !== 'Фотография') {
+    text = `Фотография · ${text}`;
+  }
+  if (last.attachmentType === 'file' && text && text !== 'Файл') {
+    text = `Файл · ${text}`;
+  }
   if (last.senderId === myId) text = `Вы: ${text}`;
   return { text, accent: false };
 }

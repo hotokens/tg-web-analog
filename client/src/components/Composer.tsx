@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { getSocket } from '../socket';
 import { useStore } from '../store';
+import { wrapSelection } from '../formatting';
 import type { Attachment } from '../types';
 import { formatSize } from '../utils';
 import { EmojiPicker } from './EmojiPicker';
@@ -18,6 +19,7 @@ interface ComposerProps {
 export function Composer({ chatId, pending, setPending, uploadFiles, uploading, onSend }: ComposerProps) {
   const [text, setText] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [formatOpen, setFormatOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const editing = useStore((state) => state.editing);
   const cancelEditing = useStore((state) => state.cancelEditing);
@@ -32,15 +34,18 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
   useEffect(() => {
     setText('');
     setEmojiOpen(false);
+    setFormatOpen(false);
   }, [chatId]);
 
   useEffect(() => {
     if (!editingHere) {
       setText('');
+      setFormatOpen(false);
       return;
     }
     setText(editingHere.text);
     setEmojiOpen(false);
+    setFormatOpen(false);
     stopTyping();
     window.requestAnimationFrame(() => {
       const element = inputRef.current;
@@ -99,6 +104,7 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
       if (!value && !editingHere.hasAttachments) return;
       setSending(true);
       setEmojiOpen(false);
+      setFormatOpen(false);
       try {
         const ok = await saveEdit(value);
         if (ok) {
@@ -116,6 +122,7 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
 
     setSending(true);
     setEmojiOpen(false);
+    setFormatOpen(false);
     try {
       const ok = await onSend(value);
       if (ok) {
@@ -132,7 +139,20 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
     cancelEditing();
     setText('');
     setEmojiOpen(false);
+    setFormatOpen(false);
     window.requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  function applyFormat(marker: string) {
+    const element = inputRef.current;
+    const start = element?.selectionStart ?? text.length;
+    const end = element?.selectionEnd ?? start;
+    const result = wrapSelection(text, start, end, marker);
+    handleChange(result.text);
+    window.requestAnimationFrame(() => {
+      element?.focus();
+      element?.setSelectionRange(result.selectionStart, result.selectionEnd);
+    });
   }
 
   function insertEmoji(emoji: string) {
@@ -154,6 +174,56 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
   return (
     <div className="composer-wrap">
       {emojiOpen && <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />}
+
+      {formatOpen && (
+        <div className="format-bar" role="toolbar" aria-label="Форматирование">
+          <button
+            type="button"
+            className="format-btn"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => applyFormat('**')}
+            title="Жирный (Ctrl/Cmd+B)"
+          >
+            <b>B</b>
+          </button>
+          <button
+            type="button"
+            className="format-btn"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => applyFormat('__')}
+            title="Курсив (Ctrl/Cmd+I)"
+          >
+            <i>I</i>
+          </button>
+          <button
+            type="button"
+            className="format-btn"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => applyFormat('~~')}
+            title="Зачёркнутый"
+          >
+            <s>S</s>
+          </button>
+          <button
+            type="button"
+            className="format-btn format-btn-code"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => applyFormat('`')}
+            title="Моноширинный текст"
+          >
+            {'</>'}
+          </button>
+          <button
+            type="button"
+            className="format-btn format-btn-spoiler"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => applyFormat('||')}
+            title="Спойлер"
+          >
+            ||
+          </button>
+        </div>
+      )}
 
       {editingHere && (
         <div className="edit-bar">
@@ -207,6 +277,20 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
       )}
 
       <div className="composer">
+        <button
+          type="button"
+          className={`composer-btn format-toggle ${formatOpen ? 'is-active' : ''}`}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setFormatOpen((open) => !open);
+            setEmojiOpen(false);
+          }}
+          title="Форматирование"
+          aria-label="Форматирование"
+        >
+          <span className="format-aa">Aa</span>
+        </button>
+
         {!editingHere && (
           <button
             type="button"
@@ -224,6 +308,19 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
           value={text}
           onChange={(event) => handleChange(event.target.value)}
           onKeyDown={(event) => {
+            if (event.key === 'Escape' && formatOpen) {
+              event.preventDefault();
+              setFormatOpen(false);
+              return;
+            }
+            if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
+              const key = event.key.toLowerCase();
+              if (key === 'b' || key === 'i' || key === 'e') {
+                event.preventDefault();
+                applyFormat(key === 'b' ? '**' : key === 'i' ? '__' : '`');
+                return;
+              }
+            }
             if (event.key === 'Escape' && editingHere) {
               event.preventDefault();
               cancelEdit();
@@ -249,7 +346,10 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
         <button
           type="button"
           className={`composer-btn ${emojiOpen ? 'is-active' : ''}`}
-          onClick={() => setEmojiOpen((open) => !open)}
+          onClick={() => {
+            setEmojiOpen((open) => !open);
+            setFormatOpen(false);
+          }}
           title="Эмодзи"
         >
           <EmojiIcon size={23} />
