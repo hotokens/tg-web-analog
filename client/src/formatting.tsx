@@ -1,6 +1,130 @@
 import { Fragment, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { Highlight, Prism, themes, type Language as PrismLanguage } from 'prism-react-renderer';
+import { useStore } from './store';
 
 type InlineKind = 'bold' | 'italic' | 'strike' | 'spoiler' | 'code';
+
+interface CodeLanguageInfo {
+  label: string | null;
+  prism: PrismLanguage | null;
+}
+
+const NO_LANGUAGE: CodeLanguageInfo = { label: null, prism: null };
+
+const LANGUAGES: Record<string, CodeLanguageInfo> = {
+  js: { label: 'JavaScript', prism: 'javascript' },
+  javascript: { label: 'JavaScript', prism: 'javascript' },
+  ts: { label: 'TypeScript', prism: 'typescript' },
+  typescript: { label: 'TypeScript', prism: 'typescript' },
+  jsx: { label: 'JSX', prism: 'jsx' },
+  tsx: { label: 'TSX', prism: 'tsx' },
+  json: { label: 'JSON', prism: 'json' },
+  css: { label: 'CSS', prism: 'css' },
+  html: { label: 'HTML', prism: 'markup' },
+  xml: { label: 'XML', prism: 'markup' },
+  md: { label: 'Markdown', prism: 'markdown' },
+  markdown: { label: 'Markdown', prism: 'markdown' },
+  py: { label: 'Python', prism: 'python' },
+  python: { label: 'Python', prism: 'python' },
+  go: { label: 'Go', prism: 'go' },
+  rust: { label: 'Rust', prism: 'rust' },
+  rs: { label: 'Rust', prism: 'rust' },
+  swift: { label: 'Swift', prism: 'swift' },
+  kotlin: { label: 'Kotlin', prism: 'kotlin' },
+  kt: { label: 'Kotlin', prism: 'kotlin' },
+  c: { label: 'C', prism: 'c' },
+  cpp: { label: 'C++', prism: 'cpp' },
+  'c++': { label: 'C++', prism: 'cpp' },
+  sql: { label: 'SQL', prism: 'sql' },
+  yaml: { label: 'YAML', prism: 'yaml' },
+  yml: { label: 'YAML', prism: 'yaml' },
+  bash: { label: 'Bash', prism: null },
+  sh: { label: 'Bash', prism: null },
+  shell: { label: 'Bash', prism: null },
+  zsh: { label: 'Bash', prism: null },
+  java: { label: 'Java', prism: null },
+  scss: { label: 'SCSS', prism: null },
+  sass: { label: 'Sass', prism: null },
+  text: { label: 'Text', prism: null },
+  txt: { label: 'Text', prism: null },
+  plain: { label: 'Text', prism: null },
+};
+
+function resolveLanguage(raw: string): CodeLanguageInfo | null {
+  const value = raw.trim();
+  if (!value) return null;
+  const known = LANGUAGES[value.toLowerCase()];
+  if (known) return known;
+  if (/^[A-Za-z][A-Za-z0-9+#.-]{0,20}$/.test(value)) {
+    return { label: value, prism: null };
+  }
+  return null;
+}
+
+function parseCodeBlock(raw: string): { code: string; language: CodeLanguageInfo } {
+  let body = raw;
+  let language = NO_LANGUAGE;
+  const newline = body.indexOf('\n');
+
+  if (newline !== -1) {
+    const firstLine = body.slice(0, newline).trim();
+    const resolved = resolveLanguage(firstLine);
+    if (resolved) {
+      language = resolved;
+      body = body.slice(newline + 1);
+    }
+  }
+
+  if (body.startsWith('\n')) body = body.slice(1);
+  if (body.endsWith('\n')) body = body.slice(0, -1);
+  return { code: body, language };
+}
+
+function CodeBlock({ code, language }: { code: string; language: CodeLanguageInfo }) {
+  const theme = useStore((state) => state.theme);
+  const prismLanguage =
+    language.prism && Prism.languages[language.prism] ? language.prism : null;
+
+  return (
+    <div className="msg-code">
+      {language.label && <div className="msg-code-head">{language.label}</div>}
+      {prismLanguage ? (
+        <Highlight
+          theme={theme === 'dark' ? themes.vsDark : themes.github}
+          code={code}
+          language={prismLanguage}
+        >
+          {({ className, style, tokens, getLineProps, getTokenProps }) => (
+            <pre
+              className={`msg-code-block ${className}`}
+              style={{ ...style, background: 'transparent' }}
+            >
+              {tokens.map((line, lineIndex) => {
+                const lineProps = getLineProps({ line });
+                return (
+                  <div
+                    key={lineIndex}
+                    {...lineProps}
+                    className={`${lineProps.className} msg-code-line`}
+                  >
+                    {line.map((token, tokenIndex) => {
+                      const tokenProps = getTokenProps({ token });
+                      return <span key={tokenIndex} {...tokenProps} />;
+                    })}
+                  </div>
+                );
+              })}
+            </pre>
+          )}
+        </Highlight>
+      ) : (
+        <pre className="msg-code-block">
+          <code>{code}</code>
+        </pre>
+      )}
+    </div>
+  );
+}
 
 const INLINE_MARKERS: Array<{ marker: string; kind: InlineKind }> = [
   { marker: '**', kind: 'bold' },
@@ -156,14 +280,8 @@ export function FormattedText({ text }: { text: string }) {
         <Fragment key={`inline-${block}`}>{parseInline(text.slice(lastIndex, match.index), `i${block}`)}</Fragment>,
       );
     }
-    let code = match[1];
-    if (code.startsWith('\n')) code = code.slice(1);
-    if (code.endsWith('\n')) code = code.slice(0, -1);
-    parts.push(
-      <pre className="msg-code-block" key={`code-${block}`}>
-        <code>{code}</code>
-      </pre>,
-    );
+    const { code, language } = parseCodeBlock(match[1]);
+    parts.push(<CodeBlock key={`code-${block}`} code={code} language={language} />);
     lastIndex = fence.lastIndex;
     block += 1;
   }
