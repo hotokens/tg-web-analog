@@ -3,7 +3,7 @@ import { Server, type Socket } from 'socket.io';
 import { userIdFromToken } from './auth.js';
 import { chatMemberIds, chatPartnerIds, isChatMember, markChatRead } from './chat-utils.js';
 import { db } from './db.js';
-import { createMessage } from './messages.js';
+import { createMessage, editMessage } from './messages.js';
 import { addConnection, removeConnection } from './presence.js';
 import { getUserRow, publicUser } from './serialize.js';
 
@@ -51,6 +51,21 @@ function registerSocket(socket: Socket): void {
       ack?.({ ok: true, message });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Не удалось отправить сообщение';
+      ack?.({ error: message });
+    }
+  });
+
+  socket.on('message:edit', (payload: any, ack?: (response: any) => void) => {
+    try {
+      const messageId = Number(payload?.messageId);
+      if (!Number.isInteger(messageId) || messageId <= 0) {
+        throw new Error('Сообщение не найдено');
+      }
+      const result = editMessage(messageId, userId, payload?.text);
+      emitToUsers(chatMemberIds(result.chatId), 'message:updated', { message: result.message });
+      ack?.({ ok: true, message: result.message });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Не удалось изменить сообщение';
       ack?.({ error: message });
     }
   });

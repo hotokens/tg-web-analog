@@ -6,6 +6,7 @@ export interface SocketHandlers {
   onDisconnect: () => void;
   onConnectError: (error: Error) => void;
   onMessage: (message: Message) => void;
+  onMessageUpdated: (message: Message) => void;
   onRead: (payload: { chatId: number; userId: number; messageId: number }) => void;
   onTyping: (payload: { chatId: number; userId: number; name: string; isTyping: boolean }) => void;
   onPresence: (payload: { userId: number; online: boolean; lastSeen: number }) => void;
@@ -29,6 +30,7 @@ export function connectSocket(token: string, handlers: SocketHandlers): Socket {
   socket.on('disconnect', handlers.onDisconnect);
   socket.on('connect_error', handlers.onConnectError);
   socket.on('message:new', handlers.onMessage);
+  socket.on('message:updated', (payload: { message: Message }) => handlers.onMessageUpdated(payload.message));
   socket.on('message:read', handlers.onRead);
   socket.on('typing', handlers.onTyping);
   socket.on('presence', handlers.onPresence);

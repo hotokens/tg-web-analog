@@ -1,7 +1,17 @@
 import { create } from 'zustand';
 import { api, getStoredToken, setStoredToken } from './api';
 import { connectSocket, disconnectSocket, getSocket } from './socket';
-import type { Attachment, Chat, LastMessage, Message, Theme, ToastState, TypingState, User } from './types';
+import type {
+  Attachment,
+  Chat,
+  EditingState,
+  LastMessage,
+  Message,
+  Theme,
+  ToastState,
+  TypingState,
+  User,
+} from './types';
 import { sortChats, syncTitle } from './utils';
 
 const THEME_KEY = 'tgweb.theme';
@@ -22,6 +32,7 @@ interface AppState {
   settingsOpen: boolean;
   newChatOpen: boolean;
   toast: ToastState | null;
+  editing: EditingState | null;
 
   boot: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
@@ -32,6 +43,9 @@ interface AppState {
   markRead: (chatId: number) => void;
   loadMore: (chatId: number) => Promise<void>;
   sendMessage: (text: string, attachments: Attachment[]) => Promise<boolean>;
+  startEditing: (message: Message) => void;
+  cancelEditing: () => void;
+  saveEdit: (text: string) => Promise<boolean>;
   createChat: (userId: number) => Promise<Chat | null>;
   saveProfile: (name: string, bio: string) => Promise<void>;
   saveAvatar: (file: File) => Promise<void>;
@@ -44,6 +58,7 @@ interface AppState {
   clearToast: () => void;
   setConnected: (connected: boolean) => void;
   receiveMessage: (message: Message) => void;
+  receiveMessageUpdated: (message: Message) => void;
   receiveRead: (payload: { chatId: number; userId: number; messageId: number }) => void;
   receiveTyping: (payload: { chatId: number; userId: number; name: string; isTyping: boolean }) => void;
   clearTyping: (chatId: number) => void;
@@ -86,6 +101,7 @@ export const useStore = create<AppState>()((set, get) => ({
   settingsOpen: false,
   newChatOpen: false,
   toast: null,
+  editing: null,
 
   boot: async () => {
     const savedTheme = localStorage.getItem(THEME_KEY) as Theme | null;
@@ -138,6 +154,7 @@ export const useStore = create<AppState>()((set, get) => ({
       connected: false,
       settingsOpen: false,
       newChatOpen: false,
+      editing: null,
     });
     syncTitle([], null);
   },
@@ -157,6 +174,8 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   openChat: async (chatId) => {
+    const state = get();
+    if (state.editing && state.editing.chatId !== chatId) set({ editing: null });
     set({ activeChatId: chatId, newChatOpen: false });
     syncTitle(get().chats, chatId);
 
@@ -179,7 +198,7 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   closeChat: () => {
-    set({ activeChatId: null });
+    set({ activeChatId: null, editing: null });
     syncTitle(get().chats, null);
   },
 
@@ -252,6 +271,50 @@ export const useStore = create<AppState>()((set, get) => ({
             get().showToast(response.error, 'error');
             resolve(false);
           } else {
+            resolve(true);
+          }
+        },
+      );
+    }),
+
+  startEditing: (message) => {
+    const me = get().user?.id;
+    if (!me || message.senderId !== me) return;
+    set({
+      editing: {
+        chatId: message.chatId,
+        messageId: message.id,
+        text: message.text,
+        hasAttachments: message.attachments.length > 0,
+      },
+    });
+  },
+
+  cancelEditing: () => set({ editing: null }),
+
+  saveEdit: (text) =>
+    new Promise<boolean>((resolve) => {
+      const editing = get().editing;
+      const socket = getSocket();
+      if (!editing) {
+        resolve(false);
+        return;
+      }
+      if (!socket || !socket.connected) {
+        get().showToast('Нет соединения с сервером', 'error');
+        resolve(false);
+        return;
+      }
+
+      socket.emit(
+        'message:edit',
+        { messageId: editing.messageId, text },
+        (response: { ok?: boolean; error?: string }) => {
+          if (response?.error) {
+            get().showToast(response.error, 'error');
+            resolve(false);
+          } else {
+            set({ editing: null });
             resolve(true);
           }
         },
@@ -357,6 +420,26 @@ export const useStore = create<AppState>()((set, get) => ({
     }
   },
 
+  receiveMessageUpdated: (message) => {
+    const state = get();
+    const list = state.messages[message.chatId];
+    const messages = list
+      ? {
+          ...state.messages,
+          [message.chatId]: list.map((item) => (item.id === message.id ? message : item)),
+        }
+      : state.messages;
+
+    const chats = state.chats.map((chat) =>
+      chat.id === message.chatId && chat.lastMessage?.id === message.id
+        ? { ...chat, lastMessage: lastMessageFrom(message) }
+        : chat,
+    );
+
+    set({ messages, chats });
+    syncTitle(chats, state.activeChatId);
+  },
+
   receiveRead: ({ chatId, userId, messageId }) => {
     const chats = get().chats.map((chat) =>
       chat.id === chatId && chat.peer.id === userId
@@ -435,6 +518,7 @@ function attachSocket(token: string): void {
       if (error.message === 'unauthorized') useStore.getState().logout();
     },
     onMessage: (message) => useStore.getState().receiveMessage(message),
+    onMessageUpdated: (message) => useStore.getState().receiveMessageUpdated(message),
     onRead: (payload) => useStore.getState().receiveRead(payload),
     onTyping: (payload) => useStore.getState().receiveTyping(payload),
     onPresence: (payload) => useStore.getState().updatePresence(payload),

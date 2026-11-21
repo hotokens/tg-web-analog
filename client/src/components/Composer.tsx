@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { getSocket } from '../socket';
+import { useStore } from '../store';
 import type { Attachment } from '../types';
 import { formatSize } from '../utils';
 import { EmojiPicker } from './EmojiPicker';
-import { AttachIcon, CloseIcon, EmojiIcon, FileIcon, SendIcon } from './Icons';
+import { AttachIcon, CheckIcon, CloseIcon, EmojiIcon, FileIcon, PencilIcon, SendIcon } from './Icons';
 
 interface ComposerProps {
   chatId: number;
@@ -18,6 +19,10 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
   const [text, setText] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const editing = useStore((state) => state.editing);
+  const cancelEditing = useStore((state) => state.cancelEditing);
+  const saveEdit = useStore((state) => state.saveEdit);
+  const editingHere = editing && editing.chatId === chatId ? editing : null;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -28,6 +33,22 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
     setText('');
     setEmojiOpen(false);
   }, [chatId]);
+
+  useEffect(() => {
+    if (!editingHere) {
+      setText('');
+      return;
+    }
+    setText(editingHere.text);
+    setEmojiOpen(false);
+    stopTyping();
+    window.requestAnimationFrame(() => {
+      const element = inputRef.current;
+      element?.focus();
+      element?.setSelectionRange(editingHere.text.length, editingHere.text.length);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingHere?.messageId]);
 
   useEffect(() => {
     const element = inputRef.current;
@@ -51,6 +72,7 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
 
   function handleChange(value: string) {
     setText(value);
+    if (editingHere) return;
     if (!value.trim()) {
       stopTyping();
       return;
@@ -71,7 +93,25 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
 
   async function submit() {
     const value = text.trim();
-    if (sending || uploading > 0) return;
+    if (sending) return;
+
+    if (editingHere) {
+      if (!value && !editingHere.hasAttachments) return;
+      setSending(true);
+      setEmojiOpen(false);
+      try {
+        const ok = await saveEdit(value);
+        if (ok) {
+          setText('');
+          window.requestAnimationFrame(() => inputRef.current?.focus());
+        }
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
+    if (uploading > 0) return;
     if (!value && pending.length === 0) return;
 
     setSending(true);
@@ -88,6 +128,13 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
     }
   }
 
+  function cancelEdit() {
+    cancelEditing();
+    setText('');
+    setEmojiOpen(false);
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
   function insertEmoji(emoji: string) {
     const element = inputRef.current;
     const start = element?.selectionStart ?? text.length;
@@ -100,13 +147,30 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
     });
   }
 
-  const canSend = (text.trim().length > 0 || pending.length > 0) && uploading === 0 && !sending;
+  const canSend = editingHere
+    ? (text.trim().length > 0 || editingHere.hasAttachments) && !sending
+    : (text.trim().length > 0 || pending.length > 0) && uploading === 0 && !sending;
 
   return (
     <div className="composer-wrap">
       {emojiOpen && <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />}
 
-      {(pending.length > 0 || uploading > 0) && (
+      {editingHere && (
+        <div className="edit-bar">
+          <span className="edit-bar-icon">
+            <PencilIcon size={16} />
+          </span>
+          <span className="edit-bar-info">
+            <span className="edit-bar-title">Редактирование</span>
+            <span className="edit-bar-text">{editingHere.text || 'Без текста'}</span>
+          </span>
+          <button type="button" className="edit-bar-close" onClick={cancelEdit} title="Отменить редактирование">
+            <CloseIcon size={16} />
+          </button>
+        </div>
+      )}
+
+      {!editingHere && (pending.length > 0 || uploading > 0) && (
         <div className="pending-strip">
           {pending.map((attachment) => (
             <div className="pending-item" key={attachment.id} title={attachment.fileName}>
@@ -143,14 +207,16 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
       )}
 
       <div className="composer">
-        <button
-          type="button"
-          className="composer-btn"
-          onClick={() => fileRef.current?.click()}
-          title="Прикрепить файл"
-        >
-          <AttachIcon size={23} />
-        </button>
+        {!editingHere && (
+          <button
+            type="button"
+            className="composer-btn"
+            onClick={() => fileRef.current?.click()}
+            title="Прикрепить файл"
+          >
+            <AttachIcon size={23} />
+          </button>
+        )}
 
         <textarea
           ref={inputRef}
@@ -158,19 +224,25 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
           value={text}
           onChange={(event) => handleChange(event.target.value)}
           onKeyDown={(event) => {
+            if (event.key === 'Escape' && editingHere) {
+              event.preventDefault();
+              cancelEdit();
+              return;
+            }
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               void submit();
             }
           }}
           onPaste={(event) => {
+            if (editingHere) return;
             const files = Array.from(event.clipboardData.files);
             if (files.length > 0) {
               event.preventDefault();
               uploadFiles(files);
             }
           }}
-          placeholder="Написать сообщение…"
+          placeholder={editingHere ? 'Редактировать сообщение…' : 'Написать сообщение…'}
           rows={1}
         />
 
@@ -188,9 +260,15 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
           className={`send-btn ${canSend ? 'is-ready' : ''}`}
           onClick={() => void submit()}
           disabled={!canSend}
-          title="Отправить"
+          title={editingHere ? 'Сохранить' : 'Отправить'}
         >
-          {sending ? <span className="mini-spinner light" /> : <SendIcon size={21} />}
+          {sending ? (
+            <span className="mini-spinner light" />
+          ) : editingHere ? (
+            <CheckIcon size={21} />
+          ) : (
+            <SendIcon size={21} />
+          )}
         </button>
       </div>
 
@@ -206,9 +284,18 @@ export function Composer({ chatId, pending, setPending, uploadFiles, uploading, 
       />
 
       <div className="composer-hint">
-        <span>Enter — отправить</span>
-        <span>Shift + Enter — новая строка</span>
-        <span>До 25 МБ на файл</span>
+        {editingHere ? (
+          <>
+            <span>Enter — сохранить</span>
+            <span>Esc — отменить</span>
+          </>
+        ) : (
+          <>
+            <span>Enter — отправить</span>
+            <span>Shift + Enter — новая строка</span>
+            <span>До 25 МБ на файл</span>
+          </>
+        )}
       </div>
     </div>
   );

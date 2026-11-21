@@ -54,6 +54,13 @@ export interface TypingState {
   at: number;
 }
 
+export interface EditingState {
+  chatId: number;
+  messageId: number;
+  text: string;
+  hasAttachments: boolean;
+}
+
 export type Theme = 'light' | 'dark';
 
 export interface ToastState {

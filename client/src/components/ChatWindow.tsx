@@ -22,6 +22,8 @@ export function ChatWindow() {
   const closeChat = useStore((state) => state.closeChat);
   const loadMore = useStore((state) => state.loadMore);
   const sendMessage = useStore((state) => state.sendMessage);
+  const startEditing = useStore((state) => state.startEditing);
+  const editing = useStore((state) => state.editing);
   const showToast = useStore((state) => state.showToast);
 
   const [pending, setPending] = useState<Attachment[]>([]);
@@ -76,6 +78,10 @@ export function ChatWindow() {
     setShowJump(false);
   }, [activeChatId]);
 
+  useEffect(() => {
+    if (editing) setPending([]);
+  }, [editing?.messageId]);
+
   const handleSend = useCallback(
     async (text: string) => {
       const ok = await sendMessage(text, pending);
@@ -118,6 +124,13 @@ export function ChatWindow() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending.length, uploading]);
+
+  useEffect(() => {
+    if (editing && atBottomRef.current) {
+      window.requestAnimationFrame(() => scrollToBottom(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(editing)]);
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
@@ -221,6 +234,7 @@ export function ChatWindow() {
         stackedTop={Boolean(samePrevious)}
         stackedBottom={Boolean(sameNext)}
         onImageClick={setLightbox}
+        onEdit={startEditing}
         onMediaLoad={() => {
           if (atBottomRef.current) scrollToBottom(false);
         }}
