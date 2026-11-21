@@ -274,11 +274,17 @@ export function FormattedText({ text }: { text: string }) {
   let match: RegExpExecArray | null;
   let block = 0;
 
+  const appendText = (segment: string, key: string) => {
+    // Fenced code is a block element: surrounding blank lines would otherwise
+    // create huge gaps because .msg-text uses white-space: pre-wrap.
+    const trimmed = segment.replace(/^\n+/, '').replace(/\n+$/, '');
+    if (!trimmed.trim()) return;
+    parts.push(<Fragment key={key}>{parseInline(trimmed, key)}</Fragment>);
+  };
+
   while ((match = fence.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      parts.push(
-        <Fragment key={`inline-${block}`}>{parseInline(text.slice(lastIndex, match.index), `i${block}`)}</Fragment>,
-      );
+      appendText(text.slice(lastIndex, match.index), `inline-${block}`);
     }
     const { code, language } = parseCodeBlock(match[1]);
     parts.push(<CodeBlock key={`code-${block}`} code={code} language={language} />);
@@ -287,9 +293,7 @@ export function FormattedText({ text }: { text: string }) {
   }
 
   if (lastIndex < text.length) {
-    parts.push(
-      <Fragment key="inline-end">{parseInline(text.slice(lastIndex), 'i-end')}</Fragment>,
-    );
+    appendText(text.slice(lastIndex), 'inline-end');
   }
 
   return <>{parts}</>;
