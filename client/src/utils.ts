@@ -58,6 +58,8 @@ export function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
+export const REACTION_EMOJIS = ['👍', '❤️', '🔥', '😂', '😮', '😢', '🙏', '🎉'] as const;
+
 export function sortChats(chats: Chat[]): Chat[] {
   return [...chats].sort((a, b) => {
     const aTime = a.lastMessage?.createdAt ?? a.createdAt;
@@ -69,13 +71,4 @@ export function sortChats(chats: Chat[]): Chat[] {
 export function syncTitle(chats: Chat[], activeChatId: number | null): void {
   const unread = chats.reduce((sum, chat) => sum + (chat.id === activeChatId ? 0 : chat.unreadCount), 0);
   document.title = unread > 0 ? `(${unread > 99 ? '99+' : unread}) Telegram Web` : 'Telegram Web';
-}
-
-export function parseUrls(text: string): Array<{ type: 'text' | 'link' | 'mention'; value: string }> {
-  const parts = text.split(/(https?:\/\/[^\s]+|@[a-zA-Z0-9_]+)/g);
-  return parts.filter(Boolean).map((part) => {
-    if (/^https?:\/\//.test(part)) return { type: 'link' as const, value: part };
-    if (/^@[a-zA-Z0-9_]+$/.test(part)) return { type: 'mention' as const, value: part };
-    return { type: 'text' as const, value: part };
-  });
 }

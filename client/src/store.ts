@@ -1,7 +1,18 @@
 import { create } from 'zustand';
 import { api, getStoredToken, setStoredToken } from './api';
 import { connectSocket, disconnectSocket, getSocket } from './socket';
-import type { Attachment, Chat, LastMessage, Message, Theme, ToastState, TypingState, User } from './types';
+import type {
+  Attachment,
+  Chat,
+  EditingState,
+  LastMessage,
+  Message,
+  Reaction,
+  Theme,
+  ToastState,
+  TypingState,
+  User,
+} from './types';
 import { sortChats, syncTitle } from './utils';
 
 const THEME_KEY = 'tgweb.theme';
@@ -22,6 +33,7 @@ interface AppState {
   settingsOpen: boolean;
   newChatOpen: boolean;
   toast: ToastState | null;
+  editing: EditingState | null;
 
   boot: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
@@ -32,6 +44,10 @@ interface AppState {
   markRead: (chatId: number) => void;
   loadMore: (chatId: number) => Promise<void>;
   sendMessage: (text: string, attachments: Attachment[]) => Promise<boolean>;
+  startEditing: (message: Message) => void;
+  cancelEditing: () => void;
+  saveEdit: (text: string) => Promise<boolean>;
+  toggleReaction: (chatId: number, messageId: number, emoji: string) => Promise<void>;
   createChat: (userId: number) => Promise<Chat | null>;
   saveProfile: (name: string, bio: string) => Promise<void>;
   saveAvatar: (file: File) => Promise<void>;
@@ -44,6 +60,13 @@ interface AppState {
   clearToast: () => void;
   setConnected: (connected: boolean) => void;
   receiveMessage: (message: Message) => void;
+  receiveMessageUpdated: (payload: {
+    chatId: number;
+    messageId: number;
+    text: string;
+    editedAt: number | null;
+  }) => void;
+  receiveMessageReactions: (payload: { chatId: number; messageId: number; reactions: Reaction[] }) => void;
   receiveRead: (payload: { chatId: number; userId: number; messageId: number }) => void;
   receiveTyping: (payload: { chatId: number; userId: number; name: string; isTyping: boolean }) => void;
   clearTyping: (chatId: number) => void;
@@ -70,6 +93,24 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : 'Что-то пошло не так';
 }
 
+function applyReactionToggle(reactions: Reaction[], emoji: string): Reaction[] {
+  const existing = reactions.find((reaction) => reaction.emoji === emoji);
+  if (!existing) {
+    return [...reactions, { emoji, count: 1, me: true }];
+  }
+  if (existing.me) {
+    if (existing.count <= 1) {
+      return reactions.filter((reaction) => reaction.emoji !== emoji);
+    }
+    return reactions.map((reaction) =>
+      reaction.emoji === emoji ? { ...reaction, count: reaction.count - 1, me: false } : reaction,
+    );
+  }
+  return reactions.map((reaction) =>
+    reaction.emoji === emoji ? { ...reaction, count: reaction.count + 1, me: true } : reaction,
+  );
+}
+
 export const useStore = create<AppState>()((set, get) => ({
   booted: false,
   token: null,
@@ -86,6 +127,7 @@ export const useStore = create<AppState>()((set, get) => ({
   settingsOpen: false,
   newChatOpen: false,
   toast: null,
+  editing: null,
 
   boot: async () => {
     const savedTheme = localStorage.getItem(THEME_KEY) as Theme | null;
@@ -138,6 +180,7 @@ export const useStore = create<AppState>()((set, get) => ({
       connected: false,
       settingsOpen: false,
       newChatOpen: false,
+      editing: null,
     });
     syncTitle([], null);
   },
@@ -157,6 +200,8 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   openChat: async (chatId) => {
+    const state = get();
+    if (state.editing && state.editing.chatId !== chatId) set({ editing: null });
     set({ activeChatId: chatId, newChatOpen: false });
     syncTitle(get().chats, chatId);
 
@@ -179,7 +224,7 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   closeChat: () => {
-    set({ activeChatId: null });
+    set({ activeChatId: null, editing: null });
     syncTitle(get().chats, null);
   },
 
@@ -254,6 +299,112 @@ export const useStore = create<AppState>()((set, get) => ({
           } else {
             resolve(true);
           }
+        },
+      );
+    }),
+
+  startEditing: (message) => {
+    const me = get().user?.id;
+    if (!me || message.senderId !== me) return;
+    set({
+      editing: {
+        chatId: message.chatId,
+        messageId: message.id,
+        text: message.text,
+        hasAttachments: message.attachments.length > 0,
+      },
+    });
+  },
+
+  cancelEditing: () => set({ editing: null }),
+
+  saveEdit: (text) =>
+    new Promise<boolean>((resolve) => {
+      const editing = get().editing;
+      const socket = getSocket();
+      if (!editing) {
+        resolve(false);
+        return;
+      }
+      if (!socket || !socket.connected) {
+        get().showToast('Нет соединения с сервером', 'error');
+        resolve(false);
+        return;
+      }
+
+      socket.emit(
+        'message:edit',
+        { messageId: editing.messageId, text },
+        (response: { ok?: boolean; error?: string }) => {
+          if (response?.error) {
+            get().showToast(response.error, 'error');
+            resolve(false);
+          } else {
+            set({ editing: null });
+            resolve(true);
+          }
+        },
+      );
+    }),
+
+  toggleReaction: (chatId, messageId, emoji) =>
+    new Promise<void>((resolve) => {
+      const socket = getSocket();
+      if (!socket || !socket.connected) {
+        get().showToast('Нет соединения с сервером', 'error');
+        resolve();
+        return;
+      }
+
+      const state = get();
+      const list = state.messages[chatId];
+      const previous = list?.find((message) => message.id === messageId)?.reactions;
+
+      if (list && previous) {
+        set({
+          messages: {
+            ...state.messages,
+            [chatId]: list.map((message) =>
+              message.id === messageId
+                ? { ...message, reactions: applyReactionToggle(message.reactions ?? [], emoji) }
+                : message,
+            ),
+          },
+        });
+      }
+
+      socket.emit(
+        'reaction:toggle',
+        { messageId, emoji },
+        (response: { ok?: boolean; error?: string; reactions?: Reaction[] }) => {
+          if (response?.error) {
+            if (list && previous) {
+              const current = get().messages[chatId] ?? [];
+              set({
+                messages: {
+                  ...get().messages,
+                  [chatId]: current.map((message) =>
+                    message.id === messageId ? { ...message, reactions: previous } : message,
+                  ),
+                },
+              });
+            }
+            get().showToast(response.error, 'error');
+          } else if (response?.reactions) {
+            const next = response.reactions;
+            const current = get().messages[chatId];
+            if (current) {
+              set({
+                messages: {
+                  ...get().messages,
+                  [chatId]: current.map((message) =>
+                    message.id === messageId ? { ...message, reactions: next } : message,
+                  ),
+                },
+              });
+            }
+          }
+          resolve();
         },
       );
     }),
@@ -357,6 +508,40 @@ export const useStore = create<AppState>()((set, get) => ({
     }
   },
 
+  receiveMessageUpdated: ({ chatId, messageId, text, editedAt }) => {
+    const state = get();
+    const list = state.messages[chatId];
+    const messages = list
+      ? {
+          ...state.messages,
+          [chatId]: list.map((item) => (item.id === messageId ? { ...item, text, editedAt } : item)),
+        }
+      : state.messages;
+
+    const chats = state.chats.map((chat) =>
+      chat.id === chatId && chat.lastMessage?.id === messageId
+        ? { ...chat, lastMessage: { ...chat.lastMessage!, text } }
+        : chat,
+    );
+
+    set({ messages, chats });
+    syncTitle(chats, state.activeChatId);
+  },
+
+  receiveMessageReactions: ({ chatId, messageId, reactions }) => {
+    const state = get();
+    const list = state.messages[chatId];
+    if (!list) return;
+    set({
+      messages: {
+        ...state.messages,
+        [chatId]: list.map((message) =>
+          message.id === messageId ? { ...message, reactions } : message,
+        ),
+      },
+    });
+  },
+
   receiveRead: ({ chatId, userId, messageId }) => {
     const chats = get().chats.map((chat) =>
       chat.id === chatId && chat.peer.id === userId
@@ -435,6 +620,8 @@ function attachSocket(token: string): void {
       if (error.message === 'unauthorized') useStore.getState().logout();
     },
     onMessage: (message) => useStore.getState().receiveMessage(message),
+    onMessageUpdated: (payload) => useStore.getState().receiveMessageUpdated(payload),
+    onMessageReactions: (payload) => useStore.getState().receiveMessageReactions(payload),
     onRead: (payload) => useStore.getState().receiveRead(payload),
     onTyping: (payload) => useStore.getState().receiveTyping(payload),
     onPresence: (payload) => useStore.getState().updatePresence(payload),

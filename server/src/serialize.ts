@@ -21,6 +21,12 @@ export interface AttachmentDTO {
   isImage: boolean;
 }
 
+export interface ReactionDTO {
+  emoji: string;
+  count: number;
+  me: boolean;
+}
+
 export interface MessageDTO {
   id: number;
   chatId: number;
@@ -30,6 +36,7 @@ export interface MessageDTO {
   editedAt: number | null;
   replyToId: number | null;
   attachments: AttachmentDTO[];
+  reactions: ReactionDTO[];
 }
 
 export interface LastMessageDTO {
@@ -79,7 +86,27 @@ export function serializeAttachment(row: any): AttachmentDTO {
   };
 }
 
-export function serializeMessage(row: any): MessageDTO {
+export function serializeReactions(messageId: number, viewerId: number | null): ReactionDTO[] {
+  const rows = db
+    .prepare(
+      `SELECT emoji,
+              COUNT(*) AS count,
+              MAX(CASE WHEN user_id = ? THEN 1 ELSE 0 END) AS me
+         FROM message_reactions
+        WHERE message_id = ?
+        GROUP BY emoji
+        ORDER BY MIN(created_at) ASC`,
+    )
+    .all(viewerId ?? 0, messageId) as Array<{ emoji: string; count: number; me: number }>;
+
+  return rows.map((row) => ({
+    emoji: row.emoji,
+    count: Number(row.count),
+    me: Boolean(row.me),
+  }));
+}
+
+export function serializeMessage(row: any, viewerId?: number): MessageDTO {
   const attachments = db
     .prepare('SELECT * FROM attachments WHERE message_id = ? ORDER BY id ASC')
     .all(row.id)
@@ -93,6 +120,7 @@ export function serializeMessage(row: any): MessageDTO {
     editedAt: row.edited_at ?? null,
     replyToId: row.reply_to_id ?? null,
     attachments,
+    reactions: serializeReactions(row.id, viewerId ?? null),
   };
 }
 

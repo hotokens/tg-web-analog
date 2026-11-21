@@ -70,5 +70,38 @@ export function createMessage(
   }
 
   const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(messageId) as any;
-  return serializeMessage(row);
+  return serializeMessage(row, senderId);
+}
+
+export function editMessage(
+  messageId: number,
+  userId: number,
+  rawText: unknown,
+): { message: MessageDTO; chatId: number } {
+  const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(messageId) as any;
+  if (!row) {
+    throw new Error('Сообщение не найдено');
+  }
+  if (!isChatMember(row.chat_id, userId)) {
+    throw new Error('Чат не найден');
+  }
+  if (row.sender_id !== userId) {
+    throw new Error('Можно редактировать только свои сообщения');
+  }
+
+  const text = String(rawText ?? '').slice(0, MAX_TEXT_LENGTH).trim();
+  const attachmentRow = db
+    .prepare('SELECT COUNT(*) AS count FROM attachments WHERE message_id = ?')
+    .get(messageId) as { count: number };
+
+  if (!text && attachmentRow.count === 0) {
+    throw new Error('Сообщение не может быть пустым');
+  }
+
+  if (text !== row.text) {
+    db.prepare('UPDATE messages SET text = ?, edited_at = ? WHERE id = ?').run(text, Date.now(), messageId);
+  }
+
+  const updated = db.prepare('SELECT * FROM messages WHERE id = ?').get(messageId) as any;
+  return { message: serializeMessage(updated, userId), chatId: row.chat_id };
 }
